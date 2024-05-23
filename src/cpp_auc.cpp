@@ -4,7 +4,6 @@
 #include <tuple>
 #include <type_traits>
 
-
 // Fill the zipped vector with pairs consisting of the
 // corresponding elements of a and b. (This assumes 
 // that the vectors have equal length)
@@ -93,6 +92,7 @@ float aupr_kernel(float* ts, bool* st, size_t len, float* sample_weight) {
 
     double tps = 0;
     double fps = 0;
+    double last_precision = 0;
     double last_recall = 0;
     double auc_pr = 0;
     double total_positives = 0;
@@ -126,10 +126,11 @@ float aupr_kernel(float* ts, bool* st, size_t len, float* sample_weight) {
         double precision = tps / (tps + fps);
         double recall = tps / total_positives;
 
-        if (i > 0) {
+        if (i > 0 && recall != last_recall) {
             auc_pr += (recall - last_recall) * precision;
         }
 
+        last_precision = precision;
         last_recall = recall;
     }
 

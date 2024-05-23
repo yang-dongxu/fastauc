@@ -55,7 +55,7 @@ class FastAuc:
         result = self._handle.cpp_auc_ext(y_score, y_true, n, sample_weight, n_sample_weights)
         return result
 
-    def pr_auc_score(self, y_true: np.array, y_score: np.array, sample_weight: np.array = None) -> float:
+    def average_precision_score(self, y_true: np.array, y_score: np.array, sample_weight: np.array = None) -> float:
         """a method to calculate AUPR via C++ lib.
 
         Args:
@@ -66,6 +66,7 @@ class FastAuc:
         Returns:
             float: AUPR score
         """
+        print("Warning! This function yeilds different results than the sklearn implementation with 2digits precision! Use with caution!")
         y_true = np.asarray(y_true, dtype=np.bool8)
         y_score = np.asarray(y_score, dtype=np.float32)
         n = len(y_true)
@@ -75,7 +76,7 @@ class FastAuc:
         result = self._handle.cpp_aupr_ext(y_score, y_true, n, sample_weight, n_sample_weights)
         return result
 
-def fast_auc(y_true: np.array, y_score: np.array, sample_weight: np.array=None) -> Union[float, str]:
+def roc_auc_score(y_true: np.array, y_score: np.array, sample_weight: np.array=None) -> Union[float, str]:
     """a function to calculate AUC via python.
 
     Args:
@@ -126,3 +127,35 @@ def fast_auc(y_true: np.array, y_score: np.array, sample_weight: np.array=None) 
     return area
 
 
+def average_precision_score(y_true: np.array, y_score: np.array) -> Union[float, str]:
+    """计算AUPR
+
+    Args:
+        y_true (np.array): 1D numpy array as true labels.
+        y_score (np.array): 1D numpy array as probability predictions.
+
+    Returns:
+        float or str: AUPR score or 'error' if imposiible to calculate
+    """
+    raise NotImplementedError("This function is not implemented yet. Use FastAuc class instead.")
+    y_true = (y_true == 1)
+    desc_score_indices = np.argsort(y_score, kind="mergesort")[::-1]
+    y_score = y_score[desc_score_indices]
+    y_true = y_true[desc_score_indices]
+
+    distinct_value_indices = np.where(np.diff(y_score))[0]
+    threshold_idxs = np.r_[distinct_value_indices, y_true.size - 1]
+
+    tps = np.cumsum(y_true)[threshold_idxs]
+    fps = 1 + threshold_idxs - tps
+
+    precision = tps / (tps + fps)
+    recall = tps / tps[-1]
+
+    precision = np.r_[1, precision]
+    recall = np.r_[0, recall]
+
+    if precision.size < 2:
+        return 'error'
+
+    return np.trapz(precision, recall) / recall[-1]
