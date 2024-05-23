@@ -46,6 +46,7 @@ class FastAuc:
         Returns:
             float: AUC score
         """
+        assert len(y_true) == len(y_score), "y_true and y_score must have the same length."
         y_true = np.asarray(y_true, dtype=np.bool8)
         y_score = np.asarray(y_score, dtype=np.float32)
         n = len(y_true)
@@ -66,7 +67,9 @@ class FastAuc:
         Returns:
             float: AUPR score
         """
-        print("Warning! This function yeilds different results than the sklearn implementation with 2digits precision! Use with caution!")
+        assert len(y_true) == len(y_score), "y_true and y_score must have the same length."
+
+        # print("Warning! This function yeilds different results than the sklearn implementation with 2digits precision! Use with caution!")
         y_true = np.asarray(y_true, dtype=np.bool8)
         y_score = np.asarray(y_score, dtype=np.float32)
         n = len(y_true)
