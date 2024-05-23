@@ -79,3 +79,72 @@ extern "C" {
         }
     }
 }
+
+template <typename tuple_type>
+float aupr_kernel(float* ts, bool* st, size_t len, float* sample_weight) {
+    std::vector<tuple_type> zipped;
+    zipped.reserve(len);
+    zip<tuple_type>(st, ts, sample_weight, len, zipped);
+
+    // Sort by score descending
+    std::sort(zipped.begin(), zipped.end(), [](const auto& a, const auto& b) {
+        return std::get<1>(a) > std::get<1>(b);
+    });
+
+    double tps = 0;
+    double fps = 0;
+    double last_recall = 0;
+    double auc_pr = 0;
+    double total_positives = 0;
+
+    // Calculate total positives
+    for (size_t i = 0; i < len; ++i) {
+        if (std::get<0>(zipped[i])) {
+            if constexpr (std::is_same<tuple_type, std::tuple<bool, float, float>>::value) {
+                total_positives += std::get<2>(zipped[i]);
+            } else {
+                total_positives += 1;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < len; ++i) {
+        if (std::get<0>(zipped[i])) {
+            if constexpr (std::is_same<tuple_type, std::tuple<bool, float, float>>::value) {
+                tps += std::get<2>(zipped[i]);
+            } else {
+                tps += 1;
+            }
+        } else {
+            if constexpr (std::is_same<tuple_type, std::tuple<bool, float, float>>::value) {
+                fps += std::get<2>(zipped[i]);
+            } else {
+                fps += 1;
+            }
+        }
+
+        double precision = tps / (tps + fps);
+        double recall = tps / total_positives;
+
+        if (i > 0) {
+            auc_pr += (recall - last_recall) * precision;
+        }
+
+        last_recall = recall;
+    }
+
+    return auc_pr;
+}
+
+extern "C" {
+    float cpp_aupr_ext(float* ts, bool* st, size_t len, float* sample_weight, size_t n_sample_weights) {
+        if (len == 0) {
+            return 0.0f; // No data, return 0 or appropriate value
+        }
+        if (n_sample_weights > 0) {
+            return aupr_kernel<std::tuple<bool, float, float>>(ts, st, len, sample_weight);
+        } else {
+            return aupr_kernel<std::tuple<bool, float>>(ts, st, len, sample_weight);
+        }
+    }
+}

@@ -1,0 +1,2 @@
+include src/cpp_auc.cpp
+include README.md

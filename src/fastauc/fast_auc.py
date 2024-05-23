@@ -3,25 +3,39 @@ import os
 from typing import Union
 import numpy as np
 from numpy.ctypeslib import ndpointer
-import numba
+import numpy as np
+from pathlib import Path
 
-
-class CppAuc:
+class FastAuc:
     """A python wrapper class for a C++ library, used to load it once and make fast calls after.
     NB be aware of data types accepted, see method docstrings. 
     """
 
     def __init__(self):
-        self._handle = ctypes.CDLL(os.path.dirname(os.path.realpath(__file__)) + "/cpp_auc.so")
+        lib_path_pattern = Path(__file__).parent / "cpp_auc*.so"
+        lib_path = list(lib_path_pattern.parent.glob(lib_path_pattern.name))
+        if not lib_path:
+            raise FileNotFoundError(f"The shared library file {lib_path_pattern} was not found.")
+        if len(lib_path) > 1:
+            raise FileExistsError("Multiple shared library files found: {}".format(lib_path))
+        
+        self._handle = ctypes.CDLL(lib_path[0])
+
         self._handle.cpp_auc_ext.argtypes = [ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
                                              ndpointer(ctypes.c_bool, flags="C_CONTIGUOUS"),
                                              ctypes.c_size_t,
                                              ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
-                                             ctypes.c_size_t
-                                             ]
+                                             ctypes.c_size_t]
         self._handle.cpp_auc_ext.restype = ctypes.c_float
 
-    def roc_auc_score(self, y_true: np.array, y_score: np.array, sample_weight: np.array=None) -> float:
+        self._handle.cpp_aupr_ext.argtypes = [ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
+                                              ndpointer(ctypes.c_bool, flags="C_CONTIGUOUS"),
+                                              ctypes.c_size_t,
+                                              ndpointer(ctypes.c_float, flags="C_CONTIGUOUS"),
+                                              ctypes.c_size_t]
+        self._handle.cpp_aupr_ext.restype = ctypes.c_float
+
+    def roc_auc_score(self, y_true: np.array, y_score: np.array, sample_weight: np.array = None) -> float:
         """a method to calculate AUC via C++ lib.
 
         Args:
@@ -32,88 +46,34 @@ class CppAuc:
         Returns:
             float: AUC score
         """
+        y_true = np.asarray(y_true, dtype=np.bool8)
+        y_score = np.asarray(y_score, dtype=np.float32)
         n = len(y_true)
         n_sample_weights = len(sample_weight) if sample_weight is not None else 0
         if sample_weight is None:
-            sample_weight = np.array([],dtype=np.float32)
+            sample_weight = np.array([], dtype=np.float32)
         result = self._handle.cpp_auc_ext(y_score, y_true, n, sample_weight, n_sample_weights)
         return result
 
-    def roc_auc_score_batch(self, y_true: np.array, y_score: np.array) -> np.array:
-        raise NotImplemented
-        return np.array(result)
+    def pr_auc_score(self, y_true: np.array, y_score: np.array, sample_weight: np.array = None) -> float:
+        """a method to calculate AUPR via C++ lib.
 
-def fast_numba_auc(y_true: np.array, y_score: np.array, sample_weight: np.array=None) -> float:
-    """a function to calculate AUC via python + numba.
+        Args:
+            y_true (np.array): 1D numpy array of dtype=np.bool8 as true labels.
+            y_score (np.array): 1D numpy array of dtype=np.float32 as probability predictions.
+            sample_weight (np.array): 1D numpy array as sample weights, optional.
 
-    Args:
-        y_true (np.array): 1D numpy array as true labels.
-        y_score (np.array): 1D numpy array as probability predictions.
-        sample_weight (np.array): 1D numpy array as sample weights, optional.
-
-    Returns:
-        AUC score as float
-    """
-
-    desc_score_indices = np.argsort(y_score)[::-1]
-    y_score = y_score[desc_score_indices]
-    y_true = y_true[desc_score_indices]
-
-    if sample_weight is None:
-        return fast_numba_auc_nonw(y_true=y_true, y_score=y_score)
-    else:
-        sample_weight = sample_weight[desc_score_indices]        
-        return fast_numba_auc_w(y_true=y_true, y_score=y_score, sample_weight=sample_weight)
-
-
-@numba.njit
-def trapezoid_area(x1: float, x2: float, y1: float, y2: float) -> float:
-    dx = x2 - x1
-    dy = y2 - y1
-    return dx * y1 + dy * dx / 2.0
-
-
-@numba.njit
-def fast_numba_auc_nonw(y_true: np.array, y_score: np.array) -> float:
-    y_true = (y_true == 1)
-
-    prev_fps = 0
-    prev_tps = 0
-    last_counted_fps = 0
-    last_counted_tps = 0
-    auc = 0.0
-    for i in range(len(y_true)):
-        tps = prev_tps + y_true[i]
-        fps = prev_fps + (1 - y_true[i])
-        if i == len(y_true) - 1 or y_score[i+1] != y_score[i]:
-            auc += trapezoid_area(last_counted_fps, fps, last_counted_tps, tps)
-            last_counted_fps = fps
-            last_counted_tps = tps
-        prev_tps = tps
-        prev_fps = fps
-    return auc / (prev_tps*prev_fps)
-
-@numba.njit
-def fast_numba_auc_w(y_true: np.array, y_score: np.array, sample_weight: np.array) -> float:
-    y_true = (y_true == 1)
-
-    prev_fps = 0
-    prev_tps = 0
-    last_counted_fps = 0
-    last_counted_tps = 0
-    auc = 0.0
-    for i in range(len(y_true)):
-        weight = sample_weight[i]
-        tps = prev_tps + y_true[i] * weight
-        fps = prev_fps + (1 - y_true[i]) * weight
-        if i == len(y_true) - 1 or y_score[i+1] != y_score[i]:
-            auc += trapezoid_area(last_counted_fps, fps, last_counted_tps, tps)
-            last_counted_fps = fps
-            last_counted_tps = tps
-        prev_tps = tps
-        prev_fps = fps
-    return auc / (prev_tps * prev_fps)
-
+        Returns:
+            float: AUPR score
+        """
+        y_true = np.asarray(y_true, dtype=np.bool8)
+        y_score = np.asarray(y_score, dtype=np.float32)
+        n = len(y_true)
+        n_sample_weights = len(sample_weight) if sample_weight is not None else 0
+        if sample_weight is None:
+            sample_weight = np.array([], dtype=np.float32)
+        result = self._handle.cpp_aupr_ext(y_score, y_true, n, sample_weight, n_sample_weights)
+        return result
 
 def fast_auc(y_true: np.array, y_score: np.array, sample_weight: np.array=None) -> Union[float, str]:
     """a function to calculate AUC via python.
@@ -164,3 +124,5 @@ def fast_auc(y_true: np.array, y_score: np.array, sample_weight: np.array=None) 
     area = direction * np.trapz(tps, fps) / (tps[-1] * fps[-1])
 
     return area
+
+
